@@ -1,0 +1,111 @@
+name: Update Database Schema Dump
+
+on:
+  workflow_call:
+    inputs:
+      php:
+        default: "8.2"
+        type: string
+        required: false
+
+jobs:
+  update-schema-dump:
+    permissions:
+      # Give the default GITHUB_TOKEN write permission to commit and push the
+      # added or changed files to the repository.
+      contents: write
+    runs-on: ubuntu-latest
+
+    env:
+      extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysqli, bcmath, soap, intl, gd, exif, iconv, imagick, redis
+
+    name: Update Schema Dump
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: test
+        ports:
+          - 3306/tcp
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+    steps:
+      - name: Set locale
+        run: sudo locale-gen de_CH.UTF-8
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare The Environment
+        run: cp .env.example .env
+
+      - name: Setup cache environment
+        id: extcache
+        uses: shivammathur/cache-extensions@v1
+        with:
+          php-version: ${{ inputs.php }}
+          extensions: ${{ env.extensions }}
+          key: extension-cache-v1
+
+      - name: Cache extensions
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.extcache.outputs.dir }}
+          key: ${{ steps.extcache.outputs.key }}
+          restore-keys: ${{ steps.extcache.outputs.key }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php }}
+          extensions: ${{ env.extensions }}
+          coverage: none
+
+      - name: Setup Problem Matches
+        run: |
+          echo "::add-matcher::${{ runner.tool_cache }}/php.json"
+          echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "::set-output name=dir::$(composer config cache-files-dir)"
+
+      - name: always-upload-cache
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install composer dependencies
+        uses: ramsey/composer-install@v2
+
+      - name: Generate Application Key
+        run: php artisan key:generate
+
+      - name: Migrate database
+        run: php artisan migrate --force
+        env:
+          DB_PORT: ${{ job.services.mysql.ports[3306] }}
+          DB_DATABASE: test
+          DB_PASSWORD: password
+          SCOUT_DRIVER: 'null'
+
+      - name: Create dump
+        run: php artisan schema:dump
+        env:
+          DB_PORT: ${{ job.services.mysql.ports[3306] }}
+          DB_DATABASE: test
+          DB_PASSWORD: password
+          SCOUT_DRIVER: 'null'
+
+      - name: Commit linted files
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📦️ Update schema dump"
