@@ -27,7 +27,7 @@ jobs:
         run: cp .env.example .env
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.composer/cache/files
           key: dependencies-laravel-composer-${{ hashFiles('composer.json') }}
@@ -41,7 +41,7 @@ jobs:
           key: extension-cache-v1
 
       - name: Cache extensions
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ steps.extcache.outputs.dir }}
           key: ${{ steps.extcache.outputs.key }}
